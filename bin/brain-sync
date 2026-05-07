@@ -1,0 +1,45 @@
+#!/bin/bash
+# Brain vault sync loop: GitHub <-> ~/brain <-> iCloud Brain folder.
+# 1. git pull (rebase) to pick up other machines' work
+# 2. unison brain to bidirectional-sync ~/brain with the iCloud copy iOS uses
+# 3. git add/commit/push anything new that arrived from iCloud
+#
+# Driven by ~/Library/LaunchAgents/st.urm.brain-sync.plist.
+
+set -euo pipefail
+
+VAULT="$HOME/brain"
+ICLOUD="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain"
+LOG="$HOME/Library/Logs/brain-sync.log"
+UNISON="/opt/homebrew/bin/unison"
+GIT="/usr/bin/git"
+
+exec >> "$LOG" 2>&1
+ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
+echo "=== $(ts) brain-sync starting ==="
+
+[[ -d "$VAULT/.git" ]] || { echo "no git repo at $VAULT, skipping"; exit 0; }
+[[ -d "$ICLOUD"   ]] || { echo "no iCloud Brain folder at $ICLOUD, skipping"; exit 0; }
+
+cd "$VAULT"
+
+if ! "$GIT" pull --rebase --autostash --quiet; then
+  echo "git pull failed — bailing for manual review"
+  exit 1
+fi
+
+if ! "$UNISON" brain -terse -batch; then
+  echo "unison failed"
+  exit 1
+fi
+
+if [[ -n "$("$GIT" status --porcelain)" ]]; then
+  "$GIT" add -A
+  "$GIT" commit -m "Auto-sync from iCloud at $(ts)" --quiet
+  "$GIT" push --quiet
+  echo "pushed new commit"
+else
+  echo "nothing new to commit"
+fi
+
+echo "=== $(ts) brain-sync done ==="
