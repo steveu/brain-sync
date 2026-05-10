@@ -5,33 +5,85 @@
 # 3. git add/commit/push anything new that arrived from iCloud
 #
 # Driven by ~/Library/LaunchAgents/st.urm.brain-sync.plist.
+#
+# iCloud orphans: when macOS's FileProvider drops a file from its client zone
+# (brctl reports BRCloudDocsErrorDomain:30) unison fails to digest it with
+# "Resource deadlock avoided" and the whole sync stalls. heal_orphans copies
+# content from the orphan into the vault and removes the iCloud copy; the
+# retry pushes a fresh file back up which FileProvider registers cleanly.
 
 set -euo pipefail
 
-VAULT="$HOME/brain"
+VAULT_REPO="$HOME/brain"
+VAULT="$VAULT_REPO/vault"
 ICLOUD="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain"
 LOG="$HOME/Library/Logs/brain-sync.log"
 UNISON="/opt/homebrew/bin/unison"
 GIT="/usr/bin/git"
+MAX_HEAL_ATTEMPTS=3
 
 exec >> "$LOG" 2>&1
 ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
 echo "=== $(ts) brain-sync starting ==="
 
-[[ -d "$VAULT/.git" ]] || { echo "no git repo at $VAULT, skipping"; exit 0; }
-[[ -d "$ICLOUD"   ]] || { echo "no iCloud Brain folder at $ICLOUD, skipping"; exit 0; }
+[[ -d "$VAULT_REPO/.git" ]] || { echo "no git repo at $VAULT_REPO, skipping"; exit 0; }
+[[ -d "$ICLOUD"          ]] || { echo "no iCloud Brain folder at $ICLOUD, skipping"; exit 0; }
 
-cd "$VAULT"
+cd "$VAULT_REPO"
 
 if ! "$GIT" pull --rebase --autostash --quiet; then
   echo "git pull failed — bailing for manual review"
   exit 1
 fi
 
-if ! "$UNISON" brain -terse -batch; then
-  echo "unison failed"
-  exit 1
-fi
+heal_orphans() {
+  local out="$1" healed=0 line src rel dst
+  while IFS= read -r line; do
+    src="${line#*Error in digesting }"
+    src="${src%:}"
+    case "$src" in
+      "$ICLOUD"/*) rel="${src#"$ICLOUD"/}" ;;
+      *) echo "auto-heal: deadlock outside iCloud root, ignoring: $src"; continue ;;
+    esac
+    dst="$VAULT/$rel"
+    if [[ ! -f "$src" ]]; then
+      echo "auto-heal: orphan $rel already gone"
+      continue
+    fi
+    echo "auto-heal: rehabilitating $rel"
+    mkdir -p "$(dirname "$dst")"
+    if cat "$src" > "$dst.tmp"; then
+      mv "$dst.tmp" "$dst"
+      rm -f "$src"
+      healed=1
+    else
+      echo "auto-heal: failed to read $rel — leaving alone"
+      rm -f "$dst.tmp"
+    fi
+  done < <(grep -E "^[[:space:]]*Error in digesting " "$out" | sort -u)
+  (( healed > 0 ))
+}
+
+unison_out="$(mktemp)"
+trap 'rm -f "$unison_out"' EXIT
+
+attempt=1
+while :; do
+  if "$UNISON" brain -terse -batch > "$unison_out" 2>&1; then
+    cat "$unison_out"
+    break
+  fi
+  cat "$unison_out"
+  if (( attempt >= MAX_HEAL_ATTEMPTS )); then
+    echo "unison still failing after $attempt attempts — bailing"
+    exit 1
+  fi
+  if ! heal_orphans "$unison_out"; then
+    echo "unison failed but no iCloud orphans to heal — bailing"
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+done
 
 if [[ -n "$("$GIT" status --porcelain)" ]]; then
   "$GIT" add -A
