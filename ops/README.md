@@ -70,6 +70,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/st.urm.brain-sync.plist
 launchctl kickstart -k gui/$(id -u)/st.urm.brain-sync
 ```
 
+## Troubleshooting
+
+- `Operation not permitted` or `heal-orphan: unreadable:` lines in `~/Library/Logs/brain-sync.log` mean the launchd job is missing Full Disk Access. See the "Full Disk Access (macOS)" section in the top-level [README](../README.md).
+
 ## Reboot test
 
 After install, reboot the Mac mini and confirm the job ran on its own:
