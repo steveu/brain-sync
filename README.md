@@ -32,7 +32,9 @@ launchctl kickstart -k gui/$(id -u)/st.urm.brain-sync
 tail -n 20 ~/Library/Logs/brain-sync.log
 ```
 
-See [`ops/README.md`](ops/README.md) for the full operational playbook.
+The plist also declares `WatchPaths` on `~/brain/vault` and the iCloud Brain folder, so any write under either tree triggers a sync within ~5s in addition to the 10-minute heartbeat. The `StartInterval` heartbeat is retained as a safety net for missed events or daemon downtime.
+
+See [`ops/README.md`](ops/README.md) for the full operational playbook, including the `WatchPaths` smoke test.
 
 ## Full Disk Access (macOS)
 

@@ -51,6 +51,29 @@ launchctl kickstart -k gui/$(id -u)/st.urm.brain-sync
 
 The script is read fresh on each invocation; no rebuild step.
 
+Note: `kickstart` is enough for script-only changes. Plist changes — including anything in the `WatchPaths` array — need a full `bootout` / `bootstrap` cycle (see "Replace the plist" below) before `launchd` picks up the new declarations.
+
+## WatchPaths
+
+The plist declares a `WatchPaths` array covering:
+
+- `~/brain/vault`
+- `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain`
+
+Any create / delete / modify on the immediate contents of either directory triggers a run within ~5s. The 600s `StartInterval` heartbeat is kept as a safety net for missed events or daemon downtime.
+
+### Smoke test
+
+After a `bootout` / `bootstrap` cycle, verify `WatchPaths` is wired correctly:
+
+```sh
+touch ~/brain/vault/_watchpaths-smoke.md && rm ~/brain/vault/_watchpaths-smoke.md
+sleep 6
+tail -n 20 ~/Library/Logs/brain-sync.log
+```
+
+Within ~5s of the `touch`/`rm`, a new `=== <timestamp> brain-sync starting ===` banner should appear in the log.
+
 ## Disable temporarily
 
 ```sh

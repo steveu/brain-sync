@@ -13,6 +13,12 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/steveu/brain/vault</string>
+        <string>/Users/steveu/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain</string>
+    </array>
+
     <key>StartInterval</key>
     <integer>600</integer>
 
