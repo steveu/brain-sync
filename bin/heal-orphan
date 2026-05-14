@@ -1,0 +1,119 @@
+#!/bin/bash
+# heal-orphan — rehabilitate a single iCloud orphan into the vault.
+#
+# Usage: heal-orphan <icloud-path> <vault-path>
+#
+# Implements the decision table in issue #2: when macOS FileProvider drops a
+# file from its client zone (BRCloudDocsErrorDomain:30) unison stalls with
+# "Resource deadlock avoided". This helper resolves one orphan at a time and
+# is called in a loop by bin/brain-sync.
+#
+# Env overrides (used by the bats fixtures):
+#   ICLOUD_ROOT  — iCloud Brain folder. Defaults to the production path.
+#   VAULT_REPO   — git repo containing the vault. Defaults to ~/brain.
+#
+# Exit codes:
+#   0  handled (including no-op)
+#   2  usage error
+#   3  iCloud copy unreadable (likely TCC / Full Disk Access — see issue #4)
+#   4  refused: iCloud path outside ICLOUD_ROOT
+
+set -euo pipefail
+
+ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain}"
+VAULT_REPO="${VAULT_REPO:-$HOME/brain}"
+
+ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
+log() { echo "heal-orphan: $*"; }
+
+if (( $# != 2 )); then
+  echo "usage: heal-orphan <icloud-path> <vault-path>" >&2
+  exit 2
+fi
+
+src="$1"
+dst="$2"
+
+# Refuse anything outside the iCloud root before touching disk.
+case "$src" in
+  "$ICLOUD_ROOT"/*) ;;
+  *) log "refused: $src is outside ICLOUD_ROOT ($ICLOUD_ROOT)"; exit 4 ;;
+esac
+
+# Both sides gone: nothing to do.
+if [[ ! -e "$src" && ! -e "$dst" ]]; then
+  log "no-op: $src and $dst both absent"
+  exit 0
+fi
+
+# iCloud orphan already gone (e.g. healed by a previous attempt).
+if [[ ! -e "$src" ]]; then
+  log "orphan already gone: $src"
+  exit 0
+fi
+
+# Try to read the iCloud copy into a temp file. We attempt the read rather
+# than trusting [[ -r ]] because TCC can let -r pass and still block I/O.
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+icloud_copy="$tmpdir/icloud"
+
+if ! cat "$src" > "$icloud_copy" 2>/dev/null; then
+  log "unreadable: $src — likely needs Full Disk Access for the caller (see issue #4)"
+  exit 3
+fi
+
+mkdir -p "$(dirname "$dst")"
+
+# Case A: vault path doesn't exist. Promote the iCloud copy into the vault.
+if [[ ! -e "$dst" ]]; then
+  log "rehabilitating (new in vault): $dst"
+  mv "$icloud_copy" "$dst"
+  rm -f "$src"
+  exit 0
+fi
+
+# Case B: contents already match. Drop the iCloud copy; unison will repush.
+if cmp -s "$icloud_copy" "$dst"; then
+  log "identical: removing iCloud copy only: $src"
+  rm -f "$src"
+  exit 0
+fi
+
+# Case C: contents differ. 3-way merge using HEAD as the base where possible.
+# rel must be relative to the git repo root so `git show HEAD:vault/<rel>`
+# resolves; we derive it from the vault path's relation to VAULT_REPO.
+rel=""
+case "$dst" in
+  "$VAULT_REPO"/*) rel="${dst#"$VAULT_REPO"/}" ;;
+esac
+
+base="$tmpdir/base"
+: > "$base"  # empty base by default (e.g. file new to git)
+if [[ -n "$rel" ]] && git -C "$VAULT_REPO" cat-file -e "HEAD:$rel" 2>/dev/null; then
+  git -C "$VAULT_REPO" show "HEAD:$rel" > "$base"
+fi
+
+merged="$tmpdir/merged"
+# git merge-file -p writes the merged result (with markers on conflict) to
+# stdout. Exit code 0 = clean merge, positive = number of conflicts (still a
+# usable result with inline markers), 128/255 = fatal error (e.g. unreadable
+# input). Treat anything outside 0..127 as fatal and leave both files alone.
+set +e
+git merge-file -p --marker-size=7 "$dst" "$base" "$icloud_copy" > "$merged"
+merge_status=$?
+set -e
+
+if (( merge_status >= 128 )); then
+  log "merge-file fatal error ($merge_status) for $dst — leaving both files untouched"
+  exit 1
+fi
+
+cp "$merged" "$dst"
+rm -f "$src"
+if (( merge_status > 0 )); then
+  log "merged with $merge_status conflict(s): $dst"
+else
+  log "merged cleanly: $dst"
+fi
+exit 0

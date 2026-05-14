@@ -5,7 +5,8 @@ Persistent-run setup for brain-sync on the Mac mini, via launchd.
 ## Layout
 
 - `launchd/st.urm.brain-sync.plist` — the launchd job. Installed into `~/Library/LaunchAgents/`.
-- The script itself lives in the repo at `bin/brain-sync`.
+- The script itself lives in the repo at `bin/brain-sync`, with the orphan healer at `bin/heal-orphan`.
+- Tests for `bin/heal-orphan` live at `tests/heal-orphan.bats`; run them from the repo root with `bats tests/` (requires `brew install bats-core`).
 
 ## Logs
 
