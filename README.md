@@ -32,7 +32,7 @@ launchctl kickstart -k gui/$(id -u)/st.urm.brain-sync
 tail -n 20 ~/Library/Logs/brain-sync.log
 ```
 
-The plist also declares `WatchPaths` on `~/brain/vault` and the iCloud Brain folder, so any write under either tree triggers a sync within ~5s in addition to the 10-minute heartbeat. The `StartInterval` heartbeat is retained as a safety net for missed events or daemon downtime.
+The plist also declares `WatchPaths` on `~/brain/vault` and the iCloud Brain folder. Launchd fires `WatchPaths` on changes to a directory's entry list — creates, deletes, renames — so editor save patterns that write a temp file and rename (Obsidian, brain-mcp) trigger a sync within ~5s. Pure in-place writes to a file already on disk may not trigger, and fall through to the 10-minute `StartInterval` heartbeat, which is retained as the safety net.
 
 See [`ops/README.md`](ops/README.md) for the full operational playbook, including the `WatchPaths` smoke test.
 

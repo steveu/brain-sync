@@ -60,7 +60,7 @@ The plist declares a `WatchPaths` array covering:
 - `~/brain/vault`
 - `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain`
 
-Any create / delete / modify on the immediate contents of either directory triggers a run within ~5s. The 600s `StartInterval` heartbeat is kept as a safety net for missed events or daemon downtime.
+Launchd fires `WatchPaths` on changes to a directory's entry list — creates, deletes, renames of immediate children. Editor save patterns that write a temp file and rename (Obsidian, brain-mcp) therefore trigger a run within ~5s; pure in-place writes to an existing file may not, and will fall through to the 600s `StartInterval` heartbeat. The heartbeat is also the safety net for missed events or daemon downtime.
 
 ### Smoke test
 
