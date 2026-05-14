@@ -20,6 +20,7 @@ ICLOUD="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain"
 LOG="$HOME/Library/Logs/brain-sync.log"
 UNISON="/opt/homebrew/bin/unison"
 GIT="/usr/bin/git"
+HEAL_ORPHAN="$(dirname "$0")/heal-orphan"
 MAX_HEAL_ATTEMPTS=3
 
 exec >> "$LOG" 2>&1
@@ -37,7 +38,8 @@ if ! "$GIT" pull --rebase --autostash --quiet; then
 fi
 
 heal_orphans() {
-  local out="$1" healed=0 line src rel dst
+  local out="$1" healed=0 line src rel dst rc had_src
+  export ICLOUD_ROOT="$ICLOUD" VAULT_REPO
   while IFS= read -r line; do
     src="${line#*Error in digesting }"
     src="${src%:}"
@@ -46,19 +48,17 @@ heal_orphans() {
       *) echo "auto-heal: deadlock outside iCloud root, ignoring: $src"; continue ;;
     esac
     dst="$VAULT/$rel"
-    if [[ ! -f "$src" ]]; then
-      echo "auto-heal: orphan $rel already gone"
+    had_src=0
+    [[ -e "$src" ]] && had_src=1
+    rc=0
+    "$HEAL_ORPHAN" "$src" "$dst" || rc=$?
+    if (( rc != 0 )); then
+      echo "auto-heal: helper exited $rc for $rel"
       continue
     fi
-    echo "auto-heal: rehabilitating $rel"
-    mkdir -p "$(dirname "$dst")"
-    if cat "$src" > "$dst.tmp"; then
-      mv "$dst.tmp" "$dst"
-      rm -f "$src"
+    # Progress means the iCloud orphan went away on this invocation.
+    if (( had_src )) && [[ ! -e "$src" ]]; then
       healed=1
-    else
-      echo "auto-heal: failed to read $rel — leaving alone"
-      rm -f "$dst.tmp"
     fi
   done < <(grep -E "^[[:space:]]*Error in digesting " "$out" | sort -u)
   (( healed > 0 ))

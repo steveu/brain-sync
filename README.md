@@ -6,7 +6,9 @@ The architecture (why Unison, why a separate iCloud copy, what the trade-offs ar
 
 ## What's in here
 
-- `bin/brain-sync` — the sync script (`set -euo pipefail`, ~45 lines).
+- `bin/brain-sync` — the sync script (`set -euo pipefail`).
+- `bin/heal-orphan` — single-orphan healer invoked by `brain-sync` when unison stalls on a FileProvider deadlock.
+- `tests/` — bats-core tests for `heal-orphan`. Run with `bats tests/`.
 - `ops/launchd/st.urm.brain-sync.plist` — the LaunchAgent, runs every 600s.
 - `ops/README.md` — install / reload / disable / logs.
 
@@ -14,7 +16,8 @@ The architecture (why Unison, why a separate iCloud copy, what the trade-offs ar
 
 ```sh
 # 1. Prerequisites
-brew install unison git
+brew install unison git bats-core
+# bats-core is only needed to run the test suite; the sync itself needs unison + git.
 # Vault and Unison profile setup are out of scope — see ADR 0002.
 
 # 2. Clone this repo to ~/code
