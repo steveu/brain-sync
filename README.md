@@ -34,6 +34,39 @@ tail -n 20 ~/Library/Logs/brain-sync.log
 
 See [`ops/README.md`](ops/README.md) for the full operational playbook.
 
+## Full Disk Access (macOS)
+
+The launchd job needs Full Disk Access (FDA) to read files in `~/Library/Mobile Documents/iCloud~md~obsidian/...`. An interactive shell inherits Terminal's FDA grant; a launchd-spawned process does not. macOS's TCC is per-executable and per-calling-app, so the same `cat` that succeeds when you run `bin/brain-sync` by hand will fail when launchd runs it.
+
+### Symptom
+
+In `~/Library/Logs/brain-sync.log`, look for either of:
+
+```
+cat: /Users/<you>/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/<...>.md: Operation not permitted
+heal-orphan: unreadable: <path> — likely needs Full Disk Access for the caller (see issue #4)
+```
+
+The first line is the raw failure from `cat`. The second is `bin/heal-orphan` wrapping that failure with a hint and exiting `3`. Either means FDA is missing on the launchd side.
+
+### Fix
+
+1. Open System Settings → Privacy & Security → Full Disk Access.
+2. Add `/bin/bash`. (You'll need to unlock and use the `+` button; `/bin` is hidden by default, so press Cmd-Shift-G in the file picker and paste `/bin/bash`.) `bin/brain-sync` shebangs to `#!/bin/bash` and launchd invokes that interpreter directly, so granting `/bin/bash` covers the whole job tree. Narrower would be adding `bin/brain-sync` itself, but TCC keys on the actual executable doing the read, which is `bash`.
+3. Bounce the job so it picks up the new grant:
+
+   ```sh
+   launchctl kickstart -k gui/$(id -u)/st.urm.brain-sync
+   ```
+
+### Verify
+
+```sh
+tail -n 50 ~/Library/Logs/brain-sync.log
+```
+
+A healthy log after the bounce has no `Operation not permitted` and no `heal-orphan: unreadable:` lines.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
