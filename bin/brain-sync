@@ -20,7 +20,9 @@ ICLOUD="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain"
 LOG="$HOME/Library/Logs/brain-sync.log"
 UNISON="/opt/homebrew/bin/unison"
 GIT="/usr/bin/git"
-HEAL_ORPHAN="$(dirname "$0")/heal-orphan"
+# Resolve to an absolute path before any `cd` so manual invocations like
+# `bin/brain-sync` keep working after we cd into $VAULT_REPO.
+HEAL_ORPHAN="$(cd "$(dirname "$0")" && pwd)/heal-orphan"
 MAX_HEAL_ATTEMPTS=3
 
 exec >> "$LOG" 2>&1

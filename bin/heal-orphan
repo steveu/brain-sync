@@ -96,16 +96,16 @@ fi
 
 merged="$tmpdir/merged"
 # git merge-file -p writes the merged result (with markers on conflict) to
-# stdout. Exit code is the number of conflicts; we keep going regardless and
-# write the result inline, per the issue's "conflicts inline are acceptable"
-# direction.
+# stdout. Exit code 0 = clean merge, positive = number of conflicts (still a
+# usable result with inline markers), 128/255 = fatal error (e.g. unreadable
+# input). Treat anything outside 0..127 as fatal and leave both files alone.
 set +e
 git merge-file -p --marker-size=7 "$dst" "$base" "$icloud_copy" > "$merged"
 merge_status=$?
 set -e
 
-if (( merge_status < 0 )); then
-  log "merge failed for $dst — leaving both files untouched"
+if (( merge_status >= 128 )); then
+  log "merge-file fatal error ($merge_status) for $dst — leaving both files untouched"
   exit 1
 fi
 
