@@ -105,6 +105,9 @@ teardown() {
   printf 'vault body\n' > "$VAULT/e.md"
   printf 'icloud body\n' > "$ICLOUD_ROOT/e.md"
   chmod 000 "$ICLOUD_ROOT/e.md"
+  # Disable the brctl retry — chmod 000 can't be fixed by it, but we don't
+  # want this test to depend on whether /usr/bin/brctl is present on the host.
+  export BRCTL=""
 
   vault_before="$(shasum "$VAULT/e.md" | awk '{print $1}')"
   # We can't shasum the icloud file while it's 000, so capture size instead.
@@ -120,6 +123,32 @@ teardown() {
   # No stray .tmp files anywhere in the vault tree.
   run find "$VAULT" -name '*.tmp'
   [ -z "$output" ]
+}
+
+@test "row 4 dataless: first read fails, brctl materialises -> rehabilitated, exit 0" {
+  mkdir -p "$ICLOUD_ROOT"
+  # Simulate a dataless FileProvider stub: file present but unreadable on the
+  # first attempt. The brctl stub flips perms back to 644 to mimic a download.
+  printf 'icloud body\n' > "$ICLOUD_ROOT/f.md"
+  chmod 000 "$ICLOUD_ROOT/f.md"
+
+  brctl_stub="$TMP/brctl"
+  cat > "$brctl_stub" <<'STUB'
+#!/bin/bash
+# Args: download <path>. Flip perms to simulate iCloud materialisation.
+if [[ "$1" == "download" && -e "$2" ]]; then
+  chmod 644 "$2"
+fi
+STUB
+  chmod +x "$brctl_stub"
+  export BRCTL="$brctl_stub"
+
+  run "$HELPER" "$ICLOUD_ROOT/f.md" "$VAULT/f.md"
+  [ "$status" -eq 0 ]
+  [ -f "$VAULT/f.md" ]
+  [ ! -e "$ICLOUD_ROOT/f.md" ]
+  run cat "$VAULT/f.md"
+  [ "$output" = "icloud body" ]
 }
 
 @test "row 5: vault missing, iCloud already gone -> exit 0, no-op" {

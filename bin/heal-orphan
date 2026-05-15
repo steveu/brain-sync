@@ -11,17 +11,21 @@
 # Env overrides (used by the bats fixtures):
 #   ICLOUD_ROOT  — iCloud Brain folder. Defaults to the production path.
 #   VAULT_REPO   — git repo containing the vault. Defaults to ~/brain.
+#   BRCTL        — path to brctl. Defaults to /usr/bin/brctl. Set to "" to
+#                  disable the dataless-file download retry.
 #
 # Exit codes:
 #   0  handled (including no-op)
 #   2  usage error
-#   3  iCloud copy unreadable (likely TCC / Full Disk Access — see issue #4)
+#   3  iCloud copy unreadable after a brctl download retry — could be TCC
+#      (Full Disk Access — see issue #4) or a stuck iCloud FileProvider
 #   4  refused: iCloud path outside ICLOUD_ROOT
 
 set -euo pipefail
 
 ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain}"
 VAULT_REPO="${VAULT_REPO:-$HOME/brain}"
+BRCTL="${BRCTL-/usr/bin/brctl}"
 
 ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
 log() { echo "heal-orphan: $*"; }
@@ -54,12 +58,31 @@ fi
 
 # Try to read the iCloud copy into a temp file. We attempt the read rather
 # than trusting [[ -r ]] because TCC can let -r pass and still block I/O.
+# A read can fail two ways: the caller lacks Full Disk Access (TCC), or the
+# file is a dataless FileProvider stub that cat can't materialise on demand.
+# We can't tell them apart from cat's error, so on failure we ask brctl to
+# download the file and retry once before bailing.
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 icloud_copy="$tmpdir/icloud"
+read_err="$tmpdir/read.err"
 
-if ! cat "$src" > "$icloud_copy" 2>/dev/null; then
-  log "unreadable: $src — likely needs Full Disk Access for the caller (see issue #4)"
+read_ok=0
+if cat "$src" > "$icloud_copy" 2>"$read_err"; then
+  read_ok=1
+fi
+
+if (( ! read_ok )) && [[ -n "$BRCTL" && -x "$BRCTL" ]]; then
+  log "first read failed ($(head -n1 "$read_err")); attempting brctl download to materialise: $src"
+  "$BRCTL" download "$src" >/dev/null 2>&1 || true
+  if cat "$src" > "$icloud_copy" 2>"$read_err"; then
+    read_ok=1
+    log "read succeeded after brctl download"
+  fi
+fi
+
+if (( ! read_ok )); then
+  log "unreadable: $src — could be Full Disk Access (TCC, see issue #4) or a stuck iCloud FileProvider; last error: $(head -n1 "$read_err")"
   exit 3
 fi
 
